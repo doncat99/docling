@@ -47,6 +47,16 @@ doc = result.document
 
 ### Formula understanding
 
+For native PDFs with formulas misclassified as code, the PDF pipeline has an
+experimental opt-in: `pipeline_options.layout_options.recover_formula_regions = True`.
+It requires a competing formula proposal, native text-cell evidence of a stacked
+fraction, and a mathematical operator. It can also join one close, left-aligned
+continuation that starts with `×`, `÷`, or `⋅`. It does not join ambiguous `+` or
+`-` list markers, infer missing formula proposals, or work without cell assignment.
+The option is disabled by default. It changes region selection, not the formula
+recognition model. Validate the resulting LaTeX against the source page before
+using it as a fact.
+
 The formula understanding step will analyze the equation formulas in documents and extract their LaTeX representation.
 The HTML export functions in the DoclingDocument will leverage the formula and visualize the result using the mathml html syntax.
 

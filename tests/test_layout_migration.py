@@ -85,6 +85,7 @@ def test_translate_matches_the_equivalent_preset(
 
 def test_translate_round_trips_postprocessing_flags():
     options = _layout_options(
+        recover_formula_regions=True,
         keep_empty_clusters=True,
         skip_cell_assignment=True,
         create_orphan_clusters=False,
@@ -92,6 +93,7 @@ def test_translate_round_trips_postprocessing_flags():
     translated = _translate(options)
 
     assert translated.keep_empty_clusters is True
+    assert translated.recover_formula_regions is True
     assert translated.skip_cell_assignment is True
     assert translated.create_orphan_clusters is False
 

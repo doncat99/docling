@@ -1616,6 +1616,16 @@ class BaseLayoutOptions(BaseOptions):
         `LayoutOptions`: Deprecated predecessor, translated onto the above.
     """
 
+    recover_formula_regions: Annotated[
+        bool,
+        Field(
+            description=(
+                "Experimental recovery of formula/code regions from native fraction evidence "
+                "and close operator-led continuations. Requires cell assignment."
+            )
+        ),
+    ] = False
+
     keep_empty_clusters: Annotated[
         bool,
         Field(
@@ -1746,6 +1756,17 @@ class BaseLayoutPostprocessorOptions(BaseOptions):
     post-processing stage and the predictor models can evolve
     independently.
     """
+
+    recover_formula_regions: Annotated[
+        bool,
+        Field(
+            description=(
+                "Experimental recovery of competing formula/code regions using native text-cell "
+                "fraction evidence, including close, aligned operator-led continuations. "
+                "Requires cell assignment. Does not improve formula transcription."
+            )
+        ),
+    ] = False
 
     keep_empty_clusters: Annotated[
         bool,

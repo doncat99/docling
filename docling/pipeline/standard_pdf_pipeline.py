@@ -661,6 +661,7 @@ class StandardPdfPipeline(ConvertPipeline):
         lo = self.pipeline_options.layout_options
         self.layout_postprocessing_model = LayoutPostprocessingModel(
             options=LayoutPostprocessorOptions(
+                recover_formula_regions=lo.recover_formula_regions,
                 skip_cell_assignment=lo.skip_cell_assignment,
                 keep_empty_clusters=lo.keep_empty_clusters,
                 create_orphan_clusters=lo.create_orphan_clusters,

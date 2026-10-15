@@ -219,10 +219,33 @@ class LayoutPostprocessor:
 
     def _process_regular_clusters(self) -> list[Cluster]:
         """Process regular clusters with iterative refinement."""
+        recovered_ids: set[int] = set()
+        competing_code_ids: set[int] = set()
+        if (
+            self.options.recover_formula_regions
+            and not self.options.skip_cell_assignment
+        ):
+            for formula in self.regular_clusters:
+                if formula.label != DocItemLabel.FORMULA or formula.confidence < 0.4:
+                    continue
+                codes = [
+                    c
+                    for c in self.regular_clusters
+                    if c.label == DocItemLabel.CODE
+                    and c.confidence >= self.CONFIDENCE_THRESHOLDS[DocItemLabel.CODE]
+                    and c.bbox.intersection_over_union(formula.bbox) > 0.9
+                ]
+                if codes and self._has_fraction_evidence(formula):
+                    recovered_ids.add(formula.id)
+                    competing_code_ids.update(c.id for c in codes)
         clusters = [
             c
             for c in self.regular_clusters
-            if c.confidence >= self.CONFIDENCE_THRESHOLDS[c.label]
+            if c.id not in competing_code_ids
+            and (
+                c.id in recovered_ids
+                or c.confidence >= self.CONFIDENCE_THRESHOLDS[c.label]
+            )
         ]
 
         # Apply label remapping
@@ -273,7 +296,101 @@ class LayoutPostprocessor:
             clusters = self._adjust_cluster_bboxes(clusters)
             clusters = self._remove_overlapping_clusters(clusters, "regular")
 
+        if recovered_ids:
+            clusters = self._merge_formula_continuations(clusters, recovered_ids)
         return clusters
+
+    def _has_fraction_evidence(self, formula: Cluster) -> bool:
+        """Require a native fraction bar inside mathematical text, not a code separator."""
+        cells = [
+            c
+            for c in self.cells
+            if not c.from_ocr
+            and ordered_bounding_box(c.to_bounding_box()).intersection_over_self(
+                ordered_bounding_box(formula.bbox)
+            )
+            > 0.8
+        ]
+        if not any(
+            any(symbol in c.text for symbol in "=∑∫√\N{MULTIPLICATION SIGN}÷")
+            for c in cells
+        ):
+            return False
+        for bar in cells:
+            text = bar.text.strip()
+            if len(text) < 3 or set(text) != {"_"}:
+                continue
+            bbox = ordered_bounding_box(bar.to_bounding_box())
+            if not has_positive_area(bbox):
+                continue
+            mid_y = (bbox.t + bbox.b) / 2
+            for operand in cells:
+                if operand is bar or not any(c.isalnum() for c in operand.text):
+                    continue
+                other = ordered_bounding_box(operand.to_bounding_box())
+                horizontal_overlap = min(bbox.r, other.r) - max(bbox.l, other.l)
+                if other.t < mid_y < other.b and horizontal_overlap > bbox.width * 0.5:
+                    return True
+        return False
+
+    def _merge_formula_continuations(
+        self, clusters: list[Cluster], recovered_ids: set[int]
+    ) -> list[Cluster]:
+        """Join only an unambiguous, close operator line to a recovered formula."""
+        formulas = [c for c in clusters if c.id in recovered_ids]
+        joins: dict[int, list[Cluster]] = defaultdict(list)
+        for continuation in clusters:
+            if continuation.label not in {DocItemLabel.LIST_ITEM, DocItemLabel.TEXT}:
+                continue
+            text = " ".join(
+                c.text for c in self._sort_cells(continuation.cells)
+            ).strip()
+            if not text or text[0] not in "\N{MULTIPLICATION SIGN}÷⋅":
+                continue
+            bbox = ordered_bounding_box(continuation.bbox)
+            if not has_positive_area(bbox):
+                continue
+            parents = [
+                f
+                for f in formulas
+                if 0 <= bbox.t - f.bbox.b <= bbox.height
+                and abs(bbox.l - f.bbox.l) <= bbox.height * 0.5
+                and bbox.r <= f.bbox.r + bbox.height * 0.5
+            ]
+            if len(parents) != 1:
+                continue
+            parent = parents[0]
+            region = BoundingBox(
+                l=min(parent.bbox.l, bbox.l),
+                t=parent.bbox.t,
+                r=max(parent.bbox.r, bbox.r),
+                b=bbox.b,
+            )
+            if any(
+                c.id not in {parent.id, continuation.id}
+                and c.bbox.intersection_over_union(region) > 0
+                for c in clusters
+            ):
+                continue
+            joins[parent.id].append(continuation)
+
+        absorbed: set[int] = set()
+        for parent in formulas:
+            # Multiple candidate lines need a separate reading-order decision.
+            if len(joins[parent.id]) != 1:
+                continue
+            continuation = joins[parent.id][0]
+            parent.cells = self._sort_cells(
+                self._deduplicate_cells(parent.cells + continuation.cells)
+            )
+            parent.bbox = BoundingBox(
+                l=min(parent.bbox.l, continuation.bbox.l),
+                t=parent.bbox.t,
+                r=max(parent.bbox.r, continuation.bbox.r),
+                b=continuation.bbox.b,
+            )
+            absorbed.add(continuation.id)
+        return [c for c in clusters if c.id not in absorbed]
 
     def _process_special_clusters(self) -> list[Cluster]:
         special_clusters = [

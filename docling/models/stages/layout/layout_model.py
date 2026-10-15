@@ -51,6 +51,7 @@ def _translate(options: LayoutOptions) -> LayoutObjectDetectionOptions:
         # engine_options omitted on purpose: the object-detection default
         # applies, so there is no second place to keep in sync.
         keep_empty_clusters=options.keep_empty_clusters,
+        recover_formula_regions=options.recover_formula_regions,
         skip_cell_assignment=options.skip_cell_assignment,
         create_orphan_clusters=options.create_orphan_clusters,
     )
