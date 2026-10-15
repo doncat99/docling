@@ -2043,7 +2043,7 @@ wheels = [
 
 [[package]]
 name = "docling-slim"
-version = "2.139.0+ontoscience.1"
+version = "2.139.0+ontoscience.2"
 source = { editable = "." }
 default-groups = "all"
 dependencies = [

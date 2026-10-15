@@ -68,6 +68,19 @@ def test_single_letter_unit_in_a_label_is_preserved():
     assert r"\text{Exposure USD m}" in transcribe_native_fraction(cells)
 
 
+def test_tall_fraction_and_brackets_do_not_shift_the_prose_baseline():
+    cells = fraction_words()
+    cells += [
+        word("[", 36, 0, 40, 26),
+        word("]", 111, 0, 115, 26),
+        word(".", 116, 18, 118, 26),
+    ]
+    assert transcribe_native_fraction(cells) == (
+        r"\text{Total} = [ \frac{\text{Exposure (USD)}}{\text{PPP GDP}} ] . "
+        r"\times \text{Emissions (tCO2e)}"
+    )
+
+
 def test_unsupported_superscript_is_not_flattened():
     cells = [*fraction_words(), word("z", 105, 0, 108, 5)]
     assert transcribe_native_fraction(cells) is None

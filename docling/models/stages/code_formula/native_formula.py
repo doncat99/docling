@@ -41,8 +41,6 @@ def _escape(text: str) -> str:
 
 def _render_run(tokens: list[_Token]) -> str | None:
     """Render one baseline, separating source subscripts from prose labels."""
-    height = median(t.box.height for t in tokens)
-    baseline = median(t.box.b for t in tokens)
     result: list[str] = []
     prose: list[str] = []
 
@@ -65,6 +63,11 @@ def _render_run(tokens: list[_Token]) -> str | None:
         ")": ")",
         ".": ".",
     }
+    # Tall brackets and fraction boxes must not move the surrounding text baseline.
+    prose_tokens = [t for t in tokens if not t.latex and t.text not in operators]
+    baseline_tokens = prose_tokens or tokens
+    height = median(t.box.height for t in baseline_tokens)
+    baseline = median(t.box.b for t in baseline_tokens)
     for token in sorted(tokens, key=lambda t: t.box.l):
         text = token.text
         if token.latex or text in operators:
