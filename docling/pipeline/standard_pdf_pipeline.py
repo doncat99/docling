@@ -68,6 +68,7 @@ from docling.models.factories import (
 from docling.models.stages.code_formula.code_formula_vlm_model import (
     CodeFormulaVlmModel,
 )
+from docling.models.stages.code_formula.native_formula import NativeFormulaModel
 from docling.models.stages.heading_hierarchy.heading_hierarchy_model import (
     HeadingHierarchyModel,
 )
@@ -709,6 +710,9 @@ class StandardPdfPipeline(ConvertPipeline):
                 accelerator_options=self.pipeline_options.accelerator_options,
                 enable_remote_services=self.pipeline_options.enable_remote_services,
             ),
+            NativeFormulaModel(
+                enabled=self.pipeline_options.do_native_formula_enrichment
+            ),
             *self.enrichment_pipe,
         ]
 
@@ -751,7 +755,10 @@ class StandardPdfPipeline(ConvertPipeline):
         if not self.keep_backend and page._backend is not None:
             page._backend.unload()
             page._backend = None
-        if not self.pipeline_options.generate_parsed_pages:
+        if not (
+            self.pipeline_options.generate_parsed_pages
+            or self.pipeline_options.do_native_formula_enrichment
+        ):
             page.parsed_page = None
 
     # ────────────────────────────────────────────────────────────────────────
@@ -1110,9 +1117,20 @@ class StandardPdfPipeline(ConvertPipeline):
         for p in conv_res.pages:
             if not self.keep_backend and p._backend is not None:
                 p._backend.unload()
-            if not self.pipeline_options.generate_parsed_pages:
+            if not (
+                self.pipeline_options.generate_parsed_pages
+                or self.pipeline_options.do_native_formula_enrichment
+            ):
                 del p.parsed_page
                 p.parsed_page = None
+
+    def _enrich_document(self, conv_res: ConversionResult) -> ConversionResult:
+        try:
+            return super()._enrich_document(conv_res)
+        finally:
+            if not self.pipeline_options.generate_parsed_pages:
+                for page in conv_res.pages:
+                    page.parsed_page = None
 
     # ---------------------------------------------------------------- assemble
     def _assemble_document(self, conv_res: ConversionResult) -> ConversionResult:

@@ -57,6 +57,22 @@ The option is disabled by default. It changes region selection, not the formula
 recognition model. Validate the resulting LaTeX against the source page before
 using it as a fact.
 
+For native PDF fractions, this fork also provides
+`pipeline_options.do_native_formula_enrichment = True`. This step uses native
+word coordinates and encoded underscore bars. It does not load a formula model.
+It preserves prose labels, units, single-letter subscripts, source summation
+limits, and operator-led continuations. It runs after optional neural enrichment;
+`orig` and page provenance remain unchanged. Parsed word cells are retained until
+this step finishes, then released unless `generate_parsed_pages=True`.
+
+This is a restricted transcription grammar, not a general equation recognizer.
+It declines OCR cells, nested or overlapping fractions, unmapped glyphs, clipped
+words, unsupported superscripts, and ambiguous continuations. It does not cover
+fraction bars drawn only as vectors or scanned formulas. A declined formula stays
+unchanged; consumers must check for missing transcription before fact extraction.
+Transcription alone does not bind variables to definitions or applicability
+conditions, and does not prove that the source equation is correct.
+
 The formula understanding step will analyze the equation formulas in documents and extract their LaTeX representation.
 The HTML export functions in the DoclingDocument will leverage the formula and visualize the result using the mathml html syntax.
 

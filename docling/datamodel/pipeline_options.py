@@ -2152,6 +2152,14 @@ class PdfPipelineOptions(PaginatedPipelineOptions):
             )
         ),
     ] = False
+    do_native_formula_enrichment: bool = Field(
+        default=False,
+        description=(
+            "Transcribe non-nested native PDF fractions from word coordinates and "
+            "encoded underscore bars. Preserves source labels and units without "
+            "a neural model. Unsupported formulas remain unchanged."
+        ),
+    )
     force_backend_text: Annotated[
         bool,
         Field(
