@@ -16,7 +16,7 @@ from docling_core.types.doc.page import (
 )
 from PIL import ImageDraw
 
-from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+from docling.datamodel.accelerator_options import AcceleratorOptions
 from docling.datamodel.base_models import Page, Table, TableStructurePrediction
 from docling.datamodel.document import ConversionResult
 from docling.datamodel.pipeline_options import (
@@ -81,10 +81,6 @@ class TableStructureModel(BaseTableStructureModel):
             )
 
             device = decide_device(accelerator_options.device)
-
-            # Disable MPS here, until we know why it makes things slower.
-            if device == AcceleratorDevice.MPS.value:
-                device = AcceleratorDevice.CPU.value
 
             self.tm_config = c.read_config(f"{artifacts_path}/tm_config.json")
             self.tm_config["model"]["save_dir"] = artifacts_path
