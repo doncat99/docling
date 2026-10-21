@@ -28,7 +28,7 @@ from docling.models.inference_engines.object_detection.base import (
 from docling.models.inference_engines.object_detection.hf_base import (
     HfObjectDetectionEngineBase,
 )
-from docling.utils.accelerator_utils import decide_device
+from docling.utils.accelerator_utils import accelerator_inference_context, decide_device
 
 if TYPE_CHECKING:
     from docling.datamodel.stage_model_specs import EngineModelConfig
@@ -210,13 +210,20 @@ class TransformersObjectDetectionEngine(HfObjectDetectionEngineBase):
         Returns:
             List of detection outputs
         """
-        import torch
-
         if not input_batch:
             return []
-        if self._model is None or self._processor is None:
+        if self._model is None or self._processor is None or self._device is None:
             raise RuntimeError("Engine not initialized. Call initialize() first.")
 
+        with accelerator_inference_context(str(self._device)):
+            return self._predict_batch(input_batch)
+
+    def _predict_batch(
+        self, input_batch: List[ObjectDetectionEngineInput]
+    ) -> List[ObjectDetectionEngineOutput]:
+        import torch
+
+        assert self._model is not None and self._processor is not None
         # Preprocess images using HF processor
         images = [item.image.convert("RGB") for item in input_batch]
         inputs = self._processor(images=images, return_tensors="pt").to(self._device)

@@ -2,12 +2,26 @@
 # SPDX-License-Identifier: MIT
 
 import logging
+from contextlib import AbstractContextManager, nullcontext
+from threading import RLock
 from typing import List, Optional
 
 from docling.datamodel.accelerator_options import AcceleratorDevice
 from docling.exceptions import AcceleratorDeviceNotAvailableError
 
 _log = logging.getLogger(__name__)
+_mps_submission_lock = RLock()
+
+
+def accelerator_inference_context(device: str) -> AbstractContextManager:
+    """Serialize MPS host submissions across model instances in this process.
+
+    Concurrent BatchNorm and arange submissions can abort Metal command encoding
+    even without explicit synchronization (PyTorch 2.14.1, macOS 15.6.1).
+    Keep input transfers, inference, and output materialization in this context.
+    CPU and CUDA inference remain concurrent. See docs/usage/mps_diagnostics.md.
+    """
+    return _mps_submission_lock if device.split(":")[0] == "mps" else nullcontext()
 
 
 def decide_device(

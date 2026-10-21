@@ -26,7 +26,7 @@ from docling.datamodel.pipeline_options import (
 from docling.datamodel.settings import settings
 from docling.models.base_table_model import BaseTableStructureModel
 from docling.models.utils.hf_model_download import download_hf_model
-from docling.utils.accelerator_utils import decide_device
+from docling.utils.accelerator_utils import accelerator_inference_context, decide_device
 from docling.utils.profiling import TimeRecorder
 
 _log = logging.getLogger(__name__)
@@ -81,6 +81,7 @@ class TableStructureModel(BaseTableStructureModel):
             )
 
             device = decide_device(accelerator_options.device)
+            self._device = device
 
             self.tm_config = c.read_config(f"{artifacts_path}/tm_config.json")
             self.tm_config["model"]["save_dir"] = artifacts_path
@@ -258,9 +259,10 @@ class TableStructureModel(BaseTableStructureModel):
                             )
                     page_input["tokens"] = tokens
 
-                    tf_output = self.tf_predictor.multi_table_predict(
-                        page_input, [tbl_box], do_matching=self.do_cell_matching
-                    )
+                    with accelerator_inference_context(self._device):
+                        tf_output = self.tf_predictor.multi_table_predict(
+                            page_input, [tbl_box], do_matching=self.do_cell_matching
+                        )
                     table_out = tf_output[0]
                     table_cells = []
                     for element in table_out["tf_responses"]:

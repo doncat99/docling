@@ -12,6 +12,9 @@ This guide describes how to maximize GPU performance for Docling pipelines. It c
 
 ### Standard Pipeline
 
+For Apple Silicon profiling and the Metal `Scheduled handler provided after
+commit call` assertion, see [MPS diagnostic troubleshooting](mps_diagnostics.md).
+
 Enable GPU acceleration by configuring the accelerator device and concurrency options using Docling's API:
 
 ```python
