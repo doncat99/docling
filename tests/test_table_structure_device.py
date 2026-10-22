@@ -44,3 +44,5 @@ def test_tableformer_uses_resolved_pipeline_device(
 
     assert predictor.call_args.args[1:] == (device, 4)
     assert predictor.call_args.args[0]["predict"]["max_steps"] == max_steps
+    context = predictor.call_args.kwargs["inference_context"]
+    assert context.args == (device,)

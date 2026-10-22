@@ -39,8 +39,8 @@ The selected changes are:
 
 No OCR, reduced precision, different model weights, CPU fallback, cross-table
 batching, or unguarded concurrent MPS submission was used. A separate BBox
-matrix-product experiment and lock-scope/merge experiments were not selected:
-their full-document gains were not established.
+matrix-product experiment was not selected. The later lock-scope decision is
+recorded below; its full-document speedup is not established.
 
 ## Three alternating full-report pairs
 
@@ -122,3 +122,53 @@ Local evidence (not distributed with this fork):
 Do not add device-wide synchronization inside the threaded conversion to obtain
 these timings. The isolated replay uses barriers only after conversion workers
 have ended. Keep full-report timings and isolated component timings distinct.
+
+## Narrower submission guard: retained, no stable speedup claim
+
+Six alternating pairs used the same 77-page report, both models on MPS,
+PyTorch 2.14.1, float32, and four CPU threads. GPU benchmarks did not overlap.
+Other system activity remained; these are not isolated performance baselines.
+
+| Pair | Coarse guard | Narrow guard |
+| --- | ---: | ---: |
+| 1 | 29.88 s | 28.63 s |
+| 2 | 29.71 s | 29.05 s |
+| 3 | 29.62 s | 29.27 s |
+| 4 | 29.77 s | 30.19 s |
+| 5, complete lock timing | 32.34 s | 34.10 s |
+| 6, complete lock timing | 29.29 s | 30.28 s |
+
+The first four pairs reduced median wall time by 1.9%; the last two were
+slower. Across all six pairs the medians were effectively equal. Summed
+layout/table host lock waits in pairs 5 and 6 fell from 12.90 to 9.34 seconds
+and 11.68 to 9.47 seconds. CPU preparation and matching overlapped layout's
+held-guard intervals. These host intervals are not GPU execution timings and
+must not be added to infer critical-path savings.
+
+All twelve conversions produced 77 pages, 37 tables, 5877 cells, and zero
+conversion errors or crashes. Complete exports matched after removing only
+bbox fields; raw tag-sequence multisets matched (9180 tags including EOS).
+Maximum bbox deviation was 0.0000611 PDF points. The existing unmatched-cell
+warning remains. Reference equality is not independently verified ground truth.
+
+Retain the narrower guard to eliminate unnecessary CPU serialization. Keep all
+device transfers, inference, tensor postprocessing, and materialization under
+the shared guard. This does not remove MPS crash protection, increase worker
+counts, or establish a stable end-to-end speedup. Regression tests check both
+predictor entry points and the layout boundary. Local evidence:
+`mps-lock-retest-oct22-results.json` in OntoScience's ignored `.tmp/` directory.
+
+The integrated source revision completed a fresh full-report run in 36.457
+seconds: 77 pages, 37 tables, 5877 cells, zero errors. Content and raw tags
+matched the coarse-guard reference; maximum bbox delta was 0.0000611 PDF
+points. This is an integration observation, not a paired speedup measurement.
+Focused validation passed 21 Docling tests and 53 model-fork tests, including
+the native MPS guard regression. The required model artifact is
+`docling-ibm-models==4.0.4+ontoscience.2`; older artifacts do not accept the
+injected inference context. No installed application was rebuilt.
+
+For this revision, changed-file `make validate` passed, including Ruff, ty,
+Tach, module coverage, maximum-line checks, and lock validation. The earlier
+metadata blocker was corrected by allowing the fork's exact direct artifact
+reference. The Docling wheel also built successfully. Earlier blocked-gate
+reports above describe their original revisions and are not current results.

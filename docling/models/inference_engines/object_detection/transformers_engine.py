@@ -227,44 +227,47 @@ class TransformersObjectDetectionEngine(HfObjectDetectionEngineBase):
         if self._model is None or self._processor is None or self._device is None:
             raise RuntimeError("Engine not initialized. Call initialize() first.")
 
-        with accelerator_inference_context(str(self._device)):
-            return self._predict_batch(input_batch)
-
-    def _predict_batch(
-        self, input_batch: List[ObjectDetectionEngineInput]
-    ) -> List[ObjectDetectionEngineOutput]:
         import torch
 
-        assert self._model is not None and self._processor is not None
         # Preprocess images using HF processor
         images = [item.image.convert("RGB") for item in input_batch]
-        inputs = self._processor(images=images, return_tensors="pt").to(self._device)
+        inputs = self._processor(images=images, return_tensors="pt")
 
         # Get target sizes for post-processing
-        target_sizes = torch.tensor(
-            [[img.height, img.width] for img in images], device=self._device
-        )
+        with accelerator_inference_context(str(self._device)):
+            inputs = inputs.to(self._device)
+            target_sizes = torch.tensor(
+                [[img.height, img.width] for img in images], device=self._device
+            )
 
-        # Run inference
-        with torch.inference_mode():
-            outputs = self._model(**inputs)  # type: ignore[operator]
+            # Run inference
+            with torch.inference_mode():
+                outputs = self._model(**inputs)  # type: ignore[operator]
 
-        # Post-process using HuggingFace processor
-        results = self._processor.post_process_object_detection(  # type: ignore[attr-defined]
-            outputs,
-            target_sizes=target_sizes,  # type: ignore[arg-type]
-            threshold=self.options.score_threshold,
-        )
+            # Post-process using HuggingFace processor
+            results = self._processor.post_process_object_detection(  # type: ignore[attr-defined]
+                outputs,
+                target_sizes=target_sizes,  # type: ignore[arg-type]
+                threshold=self.options.score_threshold,
+            )
+            materialized = [
+                (
+                    result["labels"].tolist(),
+                    result["scores"].tolist(),
+                    result["boxes"].tolist(),
+                )
+                for result in results
+            ]
 
         # Convert to our output format
         batch_outputs: List[ObjectDetectionEngineOutput] = []
-        for input_item, result in zip(input_batch, results):
+        for input_item, (labels, scores, boxes) in zip(input_batch, materialized):
             batch_outputs.append(
                 self._build_output(
                     input_item=input_item,
-                    labels=result["labels"].tolist(),
-                    scores=result["scores"].tolist(),
-                    boxes=result["boxes"].tolist(),
+                    labels=labels,
+                    scores=scores,
+                    boxes=boxes,
                 )
             )
 

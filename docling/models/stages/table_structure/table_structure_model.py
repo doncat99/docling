@@ -5,6 +5,7 @@ import copy
 import logging
 import warnings
 from collections.abc import Iterable, Sequence
+from functools import partial
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -89,7 +90,10 @@ class TableStructureModel(BaseTableStructureModel):
             self.tm_model_type = self.tm_config["model"]["type"]
 
             self.tf_predictor = TFPredictor(
-                self.tm_config, device, accelerator_options.num_threads
+                self.tm_config,
+                device,
+                accelerator_options.num_threads,
+                inference_context=partial(accelerator_inference_context, device),
             )
             self.scale = 2.0  # Scale up table input images to 144 dpi
 
@@ -260,10 +264,9 @@ class TableStructureModel(BaseTableStructureModel):
                             )
                     page_input["tokens"] = tokens
 
-                    with accelerator_inference_context(self._device):
-                        tf_output = self.tf_predictor.multi_table_predict(
-                            page_input, [tbl_box], do_matching=self.do_cell_matching
-                        )
+                    tf_output = self.tf_predictor.multi_table_predict(
+                        page_input, [tbl_box], do_matching=self.do_cell_matching
+                    )
                     table_out = tf_output[0]
                     table_cells = []
                     for element in table_out["tf_responses"]:

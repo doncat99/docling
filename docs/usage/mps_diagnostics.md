@@ -51,6 +51,13 @@ is not established. Explicit synchronization is not a necessary trigger.
   transfers and CPU materialization of outputs, across model instances.
   CPU/CUDA calls do not acquire this lock. Pipeline queues, PDF extraction, and
   table preparation remain independent of the lock.
+- Inject the same context factory into `TFPredictor(inference_context=...)`.
+  Protect model loading, device transfers, prediction, tensor postprocessing,
+  and output materialization. Run CPU image preparation, HTML conversion, and
+  cell matching outside the guard. Layout also prepares CPU inputs before
+  acquiring the guard and builds output objects after materialization.
+  The standalone predictor defaults to `nullcontext`; callers that share MPS
+  across threads must supply their shared submission guard.
 - This is a backend workaround with a concurrency cost. It does not repair
   PyTorch or turn either model into a CPU model. It cannot protect unrelated
   third-party MPS calls that bypass the context. Other MPS engines need their
