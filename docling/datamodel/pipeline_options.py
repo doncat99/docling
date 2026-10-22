@@ -152,6 +152,13 @@ class TableStructureOptions(BaseTableStructureOptions):
     """Options for the table structure (TableFormer V1)."""
 
     kind: ClassVar[str] = "docling_tableformer"
+    max_steps: Annotated[
+        int,
+        Field(
+            gt=0,
+            description="Maximum generated table tags, including the end token. Exhaustion is a conversion error.",
+        ),
+    ] = 4096
     do_cell_matching: Annotated[
         bool,
         Field(

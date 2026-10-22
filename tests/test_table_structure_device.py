@@ -8,11 +8,16 @@ import pytest
 
 from docling.datamodel.accelerator_options import AcceleratorOptions
 from docling.datamodel.pipeline_options import TableStructureOptions
-from docling.models.stages.table_structure.table_structure_model import TableStructureModel
+from docling.models.stages.table_structure.table_structure_model import (
+    TableStructureModel,
+)
 
 
 @pytest.mark.parametrize("device", ["cpu", "mps", "cuda:0"])
-def test_tableformer_uses_resolved_pipeline_device(monkeypatch, device: str) -> None:
+@pytest.mark.parametrize("max_steps", [4096, 2048])
+def test_tableformer_uses_resolved_pipeline_device(
+    monkeypatch, device: str, max_steps: int
+) -> None:
     predictor = Mock()
     monkeypatch.setattr(
         "docling.models.stages.table_structure.table_structure_model.decide_device",
@@ -20,7 +25,10 @@ def test_tableformer_uses_resolved_pipeline_device(monkeypatch, device: str) -> 
     )
     monkeypatch.setattr(
         "docling_ibm_models.tableformer.common.read_config",
-        lambda path: {"model": {"type": "TableModel04_rs"}},
+        lambda path: {
+            "model": {"type": "TableModel04_rs"},
+            "predict": {"max_steps": 1024},
+        },
     )
     monkeypatch.setattr(
         "docling_ibm_models.tableformer.data_management.tf_predictor.TFPredictor",
@@ -30,8 +38,9 @@ def test_tableformer_uses_resolved_pipeline_device(monkeypatch, device: str) -> 
     TableStructureModel(
         enabled=True,
         artifacts_path=Path("/unused-models"),
-        options=TableStructureOptions(),
+        options=TableStructureOptions(max_steps=max_steps),
         accelerator_options=AcceleratorOptions(num_threads=4),
     )
 
     assert predictor.call_args.args[1:] == (device, 4)
+    assert predictor.call_args.args[0]["predict"]["max_steps"] == max_steps

@@ -85,6 +85,7 @@ class TableStructureModel(BaseTableStructureModel):
 
             self.tm_config = c.read_config(f"{artifacts_path}/tm_config.json")
             self.tm_config["model"]["save_dir"] = artifacts_path
+            self.tm_config["predict"]["max_steps"] = options.max_steps
             self.tm_model_type = self.tm_config["model"]["type"]
 
             self.tf_predictor = TFPredictor(
