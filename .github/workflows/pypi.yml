@@ -31,6 +31,7 @@ jobs:
           path: dist/
 
   publish-docling-slim:
+    if: ${{ !startsWith(github.event.release.tag_name, 'ontoscience-docling-') }}
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -52,6 +53,7 @@ jobs:
           skip-existing: false
 
   publish-docling:
+    if: ${{ !startsWith(github.event.release.tag_name, 'ontoscience-docling-') }}
     # docling is a meta-package that depends on docling-slim, so publish it
     # after docling-slim is available on PyPI.
     needs: publish-docling-slim
@@ -79,6 +81,7 @@ jobs:
           skip-existing: false
 
   publish-docling-client:
+    if: ${{ !startsWith(github.event.release.tag_name, 'ontoscience-docling-') }}
     # docling-client is a meta-package that depends on docling-slim, so publish it
     # after docling-slim is available on PyPI.
     needs: publish-docling-slim

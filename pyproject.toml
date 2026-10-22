@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docling-slim"
-version = "2.141.0+ontoscience.1"  # Fork artifact; upstream meta-package remains compatible.
+version = "2.141.0+ontoscience.2"  # Fork artifact; upstream meta-package remains compatible.
 description = "Modular version of the Docling package: SDK and CLI for parsing PDF, DOCX, HTML, and more, to a unified document representation for powering downstream workflows such as gen AI applications."
 license = "MIT"
 keywords = [
@@ -236,7 +236,7 @@ models-local = [
   'torchvision>=0,<1',
   # >=4.0.2 relaxed its transformers pin; older releases cap transformers<5.9.0
   # on macOS, which conflicts with the mlx-vlm floor in models-vlm-inline.
-  'docling-ibm-models @ https://github.com/doncat99/docling-ibm-models/releases/download/ontoscience-models-4.0.4.2/docling_ibm_models-4.0.4+ontoscience.2-py3-none-any.whl#sha256=e9067dceb1a96b032164bf67869b289ed5fa485749b5ab94b6d9bdfe9e02df23',
+  'docling-ibm-models @ https://github.com/doncat99/docling-ibm-models/releases/download/ontoscience-models-4.0.4.3/docling_ibm_models-4.0.4+ontoscience.3-py3-none-any.whl#sha256=fad09be297a3c9152ba801931b1d76a201e5a6abd7a8a81220e0402b2a5f8d87',
   'accelerate>=1.0.0,<2',
   'huggingface_hub>=0.23,<2',
   'defusedxml>=0.7.1,<0.8.0',
