@@ -1,5 +1,9 @@
 # MPS diagnostic troubleshooting
 
+For controlled optimization measurements and output comparisons, see
+[MPS performance evidence](mps_performance.md). The submission guard below
+remains required after those optimizations.
+
 ## Metal assertion during concurrent PDF profiling
 
 Investigation date: 2026-10-22.

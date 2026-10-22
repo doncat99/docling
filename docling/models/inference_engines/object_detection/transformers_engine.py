@@ -170,6 +170,18 @@ class TransformersObjectDetectionEngine(HfObjectDetectionEngineBase):
             self._model.to(self._device)  # type: ignore[union-attr]
             self._model.eval()  # type: ignore[union-attr]
 
+            if (
+                self._device.type == "mps"
+                and self._model.config.model_type == "rt_detr_v2"
+            ):
+                from docling.models.inference_engines.object_detection.rtdetr_fusion import (
+                    fuse_rtdetr_resnet_layers,
+                )
+
+                with accelerator_inference_context(str(self._device)):
+                    folded = fuse_rtdetr_resnet_layers(self._model)
+                _log.debug("Folded %d RT-DETR ResNet normalization layers", folded)
+
             # Optionally compile model for better performance (model must be in eval mode first)
             # Works for Python < 3.14 with any torch 2.x
             # Works for Python >= 3.14 with torch >= 2.10
