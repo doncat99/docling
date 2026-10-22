@@ -1,36 +1,55 @@
 # SPDX-FileCopyrightText: The Docling Contributors
 # SPDX-License-Identifier: MIT
 
-"""Eval-only folding for Transformers RT-DETR's ResNet backbone."""
+"""Eval-only reparameterization of explicit Transformers RT-DETR layers."""
 
 from __future__ import annotations
 
 import copy
 
+import torch
 from torch import nn
+from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from transformers.models.rt_detr.modeling_rt_detr_resnet import (
     RTDetrResNetConvLayer,
     RTDetrResNetShortCut,
 )
 from transformers.models.rt_detr_v2.modeling_rt_detr_v2 import (
+    RTDetrV2ConvNormLayer,
     RTDetrV2FrozenBatchNorm2d,
+    RTDetrV2Model,
+    RTDetrV2RepVggBlock,
 )
 
 
-def fuse_rtdetr_resnet_layers(model: nn.Module) -> int:
-    """Fold fixed normalization into its preceding convolution during eval.
+@torch.no_grad()
+def fuse_rtdetr_layers(model: nn.Module) -> int:
+    """Fold fixed normalization and linear RepVGG branches during eval.
 
-    Only the two explicit RT-DETR ResNet layer types are changed. Activations,
-    strides, groups, and residual connections remain in their original owners.
+    Only explicit RT-DETR owners are changed; arbitrary Sequential layers are
+    untouched. Activations, strides, and residual connections are preserved.
     Call after checkpoint loading and eval(), before inference or compilation.
     The transformed model is for inference, not training or checkpoint export.
+    Return the number of folded normalizations and merged branch pairs.
     """
     if model.training:
         raise ValueError("RT-DETR convolution fusion requires eval mode")
 
     count = 0
-    for layer in model.modules():
+    for layer in list(model.modules()):
+        if isinstance(layer, RTDetrV2ConvNormLayer) and isinstance(
+            layer.norm, nn.BatchNorm2d
+        ):
+            layer.conv = fuse_conv_bn_eval(layer.conv, layer.norm)
+            layer.norm = nn.Identity().eval()
+            count += 1
+        if isinstance(layer, RTDetrV2Model):
+            for projection in [*layer.encoder_input_proj, *layer.decoder_input_proj]:
+                if isinstance(projection[1], nn.BatchNorm2d):
+                    projection[0] = fuse_conv_bn_eval(projection[0], projection[1])
+                    projection[1] = nn.Identity().eval()
+                    count += 1
         if not isinstance(layer, (RTDetrResNetConvLayer, RTDetrResNetShortCut)):
             continue
         convolution = layer.convolution
@@ -52,6 +71,25 @@ def fuse_rtdetr_resnet_layers(model: nn.Module) -> int:
         else:
             continue
         layer.convolution = fused
-        layer.set_submodule("normalization", nn.Identity())
+        layer.set_submodule("normalization", nn.Identity().eval())
+        count += 1
+
+    for name, layer in list(model.named_modules()):
+        if not name or not isinstance(layer, RTDetrV2RepVggBlock):
+            continue
+        # A non-linear branch cannot be merged into a single convolution.
+        if not (
+            isinstance(layer.conv1.activation, nn.Identity)
+            and isinstance(layer.conv2.activation, nn.Identity)
+        ):
+            continue
+        fused = copy.deepcopy(layer.conv1.conv)
+        fused.weight = nn.Parameter(
+            fused.weight + F.pad(layer.conv2.conv.weight, (1, 1, 1, 1))
+        )
+        fused.bias = nn.Parameter(fused.bias + layer.conv2.conv.bias)
+        model.set_submodule(
+            name, nn.Sequential(fused, copy.deepcopy(layer.activation)).eval()
+        )
         count += 1
     return count

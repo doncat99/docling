@@ -1981,8 +1981,8 @@ chunking = [
 
 [[package]]
 name = "docling-ibm-models"
-version = "4.0.4+ontoscience.2"
-source = { url = "https://github.com/doncat99/docling-ibm-models/releases/download/ontoscience-models-4.0.4.2/docling_ibm_models-4.0.4+ontoscience.2-py3-none-any.whl" }
+version = "4.0.4+ontoscience.3"
+source = { url = "https://github.com/doncat99/docling-ibm-models/releases/download/ontoscience-models-4.0.4.3/docling_ibm_models-4.0.4+ontoscience.3-py3-none-any.whl" }
 dependencies = [
     { name = "huggingface-hub" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1998,7 +1998,7 @@ dependencies = [
     { name = "transformers", version = "5.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or python_full_version >= '3.14' or sys_platform != 'darwin'" },
 ]
 wheels = [
-    { url = "https://github.com/doncat99/docling-ibm-models/releases/download/ontoscience-models-4.0.4.2/docling_ibm_models-4.0.4+ontoscience.2-py3-none-any.whl", hash = "sha256:e9067dceb1a96b032164bf67869b289ed5fa485749b5ab94b6d9bdfe9e02df23" },
+    { url = "https://github.com/doncat99/docling-ibm-models/releases/download/ontoscience-models-4.0.4.3/docling_ibm_models-4.0.4+ontoscience.3-py3-none-any.whl", hash = "sha256:fad09be297a3c9152ba801931b1d76a201e5a6abd7a8a81220e0402b2a5f8d87" },
 ]
 
 [package.metadata]
@@ -2056,7 +2056,7 @@ wheels = [
 
 [[package]]
 name = "docling-slim"
-version = "2.141.0+ontoscience.1"
+version = "2.141.0+ontoscience.2"
 source = { editable = "." }
 dependencies = [
     { name = "certifi" },
@@ -2436,7 +2436,7 @@ requires-dist = [
     { name = "defusedxml", marker = "extra == 'models-local'", specifier = ">=0.7.1,<0.8.0" },
     { name = "docling-core", specifier = ">=2.102.0,<3.0.0" },
     { name = "docling-core", extras = ["chunking"], marker = "extra == 'feat-chunking'", specifier = ">=2.102.0,<3.0.0" },
-    { name = "docling-ibm-models", marker = "extra == 'models-local'", url = "https://github.com/doncat99/docling-ibm-models/releases/download/ontoscience-models-4.0.4.2/docling_ibm_models-4.0.4+ontoscience.2-py3-none-any.whl" },
+    { name = "docling-ibm-models", marker = "extra == 'models-local'", url = "https://github.com/doncat99/docling-ibm-models/releases/download/ontoscience-models-4.0.4.3/docling_ibm_models-4.0.4+ontoscience.3-py3-none-any.whl" },
     { name = "docling-parse", marker = "extra == 'format-pdf-docling'", specifier = ">=7.22.2,<8.0.0" },
     { name = "docling-slim", extras = ["convert-core"], marker = "extra == 'extract-core'" },
     { name = "docling-slim", extras = ["format-audio"], marker = "extra == 'format-video'" },

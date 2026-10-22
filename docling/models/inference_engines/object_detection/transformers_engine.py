@@ -167,7 +167,6 @@ class TransformersObjectDetectionEngine(HfObjectDetectionEngineBase):
                 str(model_folder),
                 **dtype_kwargs,
             )
-            self._model.to(self._device)  # type: ignore[union-attr]
             self._model.eval()  # type: ignore[union-attr]
 
             if (
@@ -175,12 +174,16 @@ class TransformersObjectDetectionEngine(HfObjectDetectionEngineBase):
                 and self._model.config.model_type == "rt_detr_v2"
             ):
                 from docling.models.inference_engines.object_detection.rtdetr_fusion import (
-                    fuse_rtdetr_resnet_layers,
+                    fuse_rtdetr_layers,
                 )
 
-                with accelerator_inference_context(str(self._device)):
-                    folded = fuse_rtdetr_resnet_layers(self._model)
-                _log.debug("Folded %d RT-DETR ResNet normalization layers", folded)
+                # Fold fixed weights on CPU before the single device transfer.
+                # Folding on MPS submits many small initialization kernels.
+                folded = fuse_rtdetr_layers(self._model)
+                _log.debug("Folded %d RT-DETR normalizations and branch pairs", folded)
+
+            with accelerator_inference_context(str(self._device)):
+                self._model.to(self._device)  # type: ignore[union-attr]
 
             # Optionally compile model for better performance (model must be in eval mode first)
             # Works for Python < 3.14 with any torch 2.x

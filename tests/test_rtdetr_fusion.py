@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: The Docling Contributors
 # SPDX-License-Identifier: MIT
 
+import copy
+
 import pytest
 import torch
 from torch import nn
@@ -9,11 +11,14 @@ from transformers.models.rt_detr.modeling_rt_detr_resnet import (
     RTDetrResNetShortCut,
 )
 from transformers.models.rt_detr_v2.modeling_rt_detr_v2 import (
+    RTDetrV2Config,
+    RTDetrV2ConvNormLayer,
     RTDetrV2FrozenBatchNorm2d,
+    RTDetrV2RepVggBlock,
 )
 
 from docling.models.inference_engines.object_detection.rtdetr_fusion import (
-    fuse_rtdetr_resnet_layers,
+    fuse_rtdetr_layers,
 )
 
 
@@ -42,15 +47,65 @@ def test_folding_preserves_loaded_resnet_outputs(
     layer.eval().to(device)
     image = torch.randn(2, 4, 17, 19, device=device)
     reference = layer(image)
-    assert fuse_rtdetr_resnet_layers(layer) == 1
+    assert fuse_rtdetr_layers(layer) == 1
     torch.testing.assert_close(layer(image), reference, rtol=2e-5, atol=2e-6)
-    assert fuse_rtdetr_resnet_layers(layer) == 0
+    assert fuse_rtdetr_layers(layer) == 0
     torch.testing.assert_close(layer(image), reference, rtol=2e-5, atol=2e-6)
 
 
 def test_folding_rejects_training_and_leaves_other_models_unchanged() -> None:
     model = nn.Sequential(nn.Conv2d(4, 8, 3), nn.BatchNorm2d(8))
     with pytest.raises(ValueError, match="eval"):
-        fuse_rtdetr_resnet_layers(model)
-    assert fuse_rtdetr_resnet_layers(model.eval()) == 0
+        fuse_rtdetr_layers(model)
+    assert fuse_rtdetr_layers(model.eval()) == 0
     assert isinstance(model[1], nn.BatchNorm2d)
+
+
+@pytest.mark.parametrize("device", ["cpu", "mps"])
+@pytest.mark.parametrize("repvgg", [False, True])
+@pytest.mark.parametrize("fold_on_cpu", [False, True])
+@torch.no_grad()
+def test_encoder_folding_preserves_outputs_and_removes_redundant_operators(
+    device: str, repvgg: bool, fold_on_cpu: bool
+) -> None:
+    if device == "mps" and not torch.backends.mps.is_available():
+        pytest.skip("requires Apple MPS")
+    torch.manual_seed(13)
+    config = RTDetrV2Config(encoder_hidden_dim=8, hidden_expansion=1.0)
+    layer = (
+        RTDetrV2RepVggBlock(config)
+        if repvgg
+        else RTDetrV2ConvNormLayer(config, 8, 8, 3, 1, activation="silu")
+    )
+    model = nn.Sequential(layer)
+    for normalization in model.modules():
+        if isinstance(normalization, nn.BatchNorm2d):
+            normalization.weight.copy_(torch.rand(8) + 0.1)
+            normalization.bias.copy_(torch.randn(8))
+            normalization.running_mean.copy_(torch.randn(8))
+            normalization.running_var.copy_(torch.rand(8) + 0.2)
+    model.eval()
+    image = torch.randn(2, 8, 17, 19, device=device)
+    reference = copy.deepcopy(model).to(device)(image)
+    if not fold_on_cpu:
+        model.to(device)
+    assert fuse_rtdetr_layers(model) > 0
+    model.to(device)
+    assert not any(isinstance(item, nn.BatchNorm2d) for item in model.modules())
+    assert sum(isinstance(item, nn.Conv2d) for item in model.modules()) == 1
+    assert not any(item.training for item in model.modules())
+    torch.testing.assert_close(model(image), reference, rtol=3e-5, atol=3e-6)
+    assert fuse_rtdetr_layers(model) == 0
+
+
+@torch.no_grad()
+def test_folding_preserves_non_linear_branch_activation() -> None:
+    config = RTDetrV2Config(encoder_hidden_dim=8, hidden_expansion=1.0)
+    block = RTDetrV2RepVggBlock(config)
+    block.conv2.activation = nn.ReLU()
+    model = nn.Sequential(block).eval()
+    image = torch.randn(1, 8, 7, 9)
+    reference = model(image)
+    assert fuse_rtdetr_layers(model) == 2
+    assert isinstance(model[0], RTDetrV2RepVggBlock)
+    torch.testing.assert_close(model(image), reference)
