@@ -25,6 +25,7 @@ from docling.datamodel.document import InputDocument
 from docling.datamodel.pipeline_options import HeadingHierarchyOptions
 from docling.models.stages.heading_hierarchy.heading_hierarchy_model import (
     HeadingHierarchyModel,
+    _infer_from_bookmarks,
     _match_score,
 )
 from docling.utils.pdf_outline import (
@@ -157,6 +158,38 @@ def test_wrong_page_bookmark_does_not_match():
 
     # No numbering, no style, no matched bookmark -> level unchanged.
     assert [h.level for h in doc.texts] == [1]
+
+
+@pytest.mark.parametrize("unknown_first", [False, True])
+def test_bookmark_page_filter_preserves_unknown_page_ties_and_claims(unknown_first):
+    doc = DoclingDocument(name="t")
+    doc.add_page(page_no=1, size=Size(width=600, height=800))
+    doc.add_page(page_no=2, size=Size(width=600, height=800))
+    wrong_page = doc.add_heading(text="Scope", prov=_prov(2, "Scope", 40))
+    if unknown_first:
+        unknown = doc.add_heading(text="Scope")
+    known = doc.add_heading(text="Scope", prov=_prov(1, "Scope", 40))
+    if not unknown_first:
+        unknown = doc.add_heading(text="Scope")
+    outline = [
+        _PdfOutlineItem(title="Scope", level=0, page_no=1),
+        _PdfOutlineItem(title="Scope", level=1, page_no=1),
+        _PdfOutlineItem(title="Scope", level=2),
+    ]
+    matches = _infer_from_bookmarks(doc, outline, HeadingHierarchyOptions())
+    first, second = (unknown, known) if unknown_first else (known, unknown)
+    assert matches == {id(first): 1, id(second): 2, id(wrong_page): 3}
+
+
+def test_bookmark_page_filter_keeps_vertical_tie_break():
+    doc = DoclingDocument(name="t")
+    doc.add_page(page_no=1, size=Size(width=600, height=800))
+    far = doc.add_heading(text="Scope", prov=_prov(1, "Scope", 40))
+    near = doc.add_heading(text="Scope", prov=_prov(1, "Scope", 120))
+    outline = [_PdfOutlineItem(title="Scope", level=0, page_no=1, y_top=120)]
+    matches = _infer_from_bookmarks(doc, outline, HeadingHierarchyOptions())
+    assert matches == {id(near): 1}
+    assert id(far) not in matches
 
 
 def test_use_bookmarks_false_ignores_outline():

@@ -36,6 +36,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from heapq import merge
 from statistics import median
 
 from docling_core.types.doc import DoclingDocument
@@ -479,6 +480,9 @@ def _infer_from_bookmarks(
         return {}
 
     info = [(item, *_item_page_and_top(item, document)) for item in candidates]
+    by_page: dict[int | None, list[int]] = {}
+    for idx, (_, page_no, _) in enumerate(info):
+        by_page.setdefault(page_no, []).append(idx)
     claimed: set[int] = set()
     matches: list[tuple[SectionHeaderItem | ListItem, int]] = []
 
@@ -493,11 +497,16 @@ def _infer_from_bookmarks(
         best_idx: int | None = None
         best_score = 0.0
         best_dist = float("inf")
-        for idx, (item, page_no, top) in enumerate(info):
+        # Merge in document order so equal-score ties keep their original winner.
+        indices = (
+            range(len(info))
+            if bm.page_no is None
+            else merge(by_page.get(bm.page_no, []), by_page.get(None, []))
+        )
+        for idx in indices:
             if idx in claimed:
                 continue
-            if bm.page_no is not None and page_no is not None and page_no != bm.page_no:
-                continue
+            item, _, top = info[idx]
             score = _match_score(item.text, title)
             if score < threshold:
                 continue

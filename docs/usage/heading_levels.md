@@ -80,9 +80,29 @@ Two things are worth knowing about this pass:
 
     The pypdfium2 backend returns the richest outline: title, depth, target page and vertical
     position. The docling-parse backends read their own native table of contents, which carries
-    titles and hierarchy but no page numbers — matching then falls back to titles alone, with a
-    stricter similarity threshold to compensate. Backends with no embedded outline, image inputs
-    among them, report nothing and the stage moves on to numbering.
+    titles, hierarchy and available destination pages. A bookmark genuinely missing its destination
+    page falls back to title matching across the document, with a stricter similarity threshold.
+    Backends with no embedded outline, image inputs among them, report nothing and the stage moves
+    on to numbering.
+
+#### Matching cost and page-index regression coverage
+
+Known-page bookmarks search candidates on that page plus candidates whose provenance has no page.
+The two groups are merged in original document order: equal-score ties, vertical-position
+tie-breaking, claimed-item exclusion and list-item promotion retain their previous behavior.
+Pageless bookmarks still search the complete candidate list. The index does not fix the potentially
+expensive global fuzzy matching of a genuinely pageless outline (upstream issue #4162).
+
+A captured 574-page textbook has 343 bookmarks and 4,298 heading/list candidates. Page indexing
+reduces candidate visits from 1,474,214 to 2,497; fuzzy comparisons remain 2,393. The serialized
+document and authoritative heading-level mapping are identical to the unindexed reference.
+Three replays of the landed implementation reproduced both reference hashes and all 343 matches.
+These are heading-stage checks, not a claim of substantial whole-document acceleration. Heading
+inference remains disabled by default; this change does not enable it in consuming applications.
+
+`tests/test_heading_hierarchy_bookmarks.py` covers unknown provenance, equal-score order, claimed
+candidates, pageless bookmarks and vertical-position ties. The PDF-outline tests separately protect
+native destination-page extraction, already restored by upstream #4244.
 
 ### Numbering
 
