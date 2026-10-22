@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import logging
+import platform
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -26,7 +27,7 @@ from docling.exceptions import (
     RapidOcrModelSizeNotSupportedError,
 )
 from docling.models.base_ocr_model import BaseOcrModel
-from docling.utils.accelerator_utils import decide_device
+from docling.utils.accelerator_utils import accelerator_inference_context, decide_device
 from docling.utils.ocr_language import (
     OcrLanguage,
     OcrLanguageResolver,
@@ -497,8 +498,20 @@ class RapidOcrModel(BaseOcrModel):
 
             # Decide the accelerator devices
             device = decide_device(accelerator_options.device)
-            use_cuda = str(AcceleratorDevice.CUDA.value).lower() in device
-            use_dml = accelerator_options.device == AcceleratorDevice.AUTO
+            use_cuda = device == "cuda" or device.startswith("cuda:")
+            use_dml = False
+            if self.options.backend == "onnxruntime":
+                import onnxruntime
+
+                providers = onnxruntime.get_available_providers()
+                # ORT and Torch have different installed accelerator capabilities.
+                if accelerator_options.device == AcceleratorDevice.AUTO:
+                    use_cuda = "CUDAExecutionProvider" in providers
+                    use_dml = (
+                        not use_cuda
+                        and platform.system() == "Windows"
+                        and "DmlExecutionProvider" in providers
+                    )
             intra_op_num_threads = accelerator_options.num_threads
             gpu_id = 0
             if use_cuda and ":" in device:
@@ -628,23 +641,21 @@ class RapidOcrModel(BaseOcrModel):
                 # Engine-level ONNXRuntime settings
                 "EngineConfig.onnxruntime.intra_op_num_threads": intra_op_num_threads,
                 "EngineConfig.onnxruntime.use_cuda": use_cuda,
+                "EngineConfig.onnxruntime.use_dml": use_dml,
+                # CoreML compilation and dynamic-shape costs require a model-specific
+                # benchmark. Explicit rapidocr_params may enable it for that workload.
+                "EngineConfig.onnxruntime.use_coreml": False,
                 "EngineConfig.onnxruntime.cuda_ep_cfg.device_id": gpu_id,
                 # Engine-level OpenVINO settings
                 "EngineConfig.openvino.inference_num_threads": intra_op_num_threads,
                 # Detection model settings
                 "Det.model_path": det_model_path,
-                "Det.use_cuda": use_cuda,
-                "Det.use_dml": use_dml,
                 # Classification model settings
                 "Cls.model_path": cls_model_path,
-                "Cls.use_cuda": use_cuda,
-                "Cls.use_dml": use_dml,
                 # Recognition model settings
                 "Rec.model_path": rec_model_path,
                 "Rec.font_path": font_path,
                 "Rec.rec_keys_path": rec_keys_path,
-                "Rec.use_cuda": use_cuda,
-                "Rec.use_dml": use_dml,
                 "Det.engine_type": backend_enum,
                 "Cls.engine_type": backend_enum,
                 "Rec.engine_type": backend_enum,
@@ -652,6 +663,7 @@ class RapidOcrModel(BaseOcrModel):
                 "EngineConfig.paddle.use_cuda": use_cuda,
                 "EngineConfig.paddle.cuda_ep_cfg.device_id": gpu_id,
                 "EngineConfig.torch.use_cuda": use_cuda,
+                "EngineConfig.torch.use_mps": device == AcceleratorDevice.MPS,
                 "EngineConfig.torch.cuda_ep_cfg.device_id": gpu_id,
             }
 
@@ -668,9 +680,25 @@ class RapidOcrModel(BaseOcrModel):
                 _log.debug("Overwriting RapidOCR params with user-provided values.")
                 params.update(user_params)
 
-            self.reader = RapidOCR(
-                params=params,
+            if (
+                self.options.backend == "onnxruntime"
+                and params["EngineConfig.onnxruntime.use_cuda"]
+                and "CUDAExecutionProvider" not in providers
+            ):
+                raise RuntimeError(
+                    "RapidOCR CUDA was requested, but this ONNX Runtime has no "
+                    "CUDAExecutionProvider. Install a matching onnxruntime-gpu "
+                    "runtime; a CUDA-enabled Torch package is not sufficient."
+                )
+
+            self._inference_device = (
+                "mps"
+                if self.options.backend == "torch"
+                and params["EngineConfig.torch.use_mps"]
+                else "cpu"
             )
+            with accelerator_inference_context(self._inference_device):
+                self.reader = RapidOCR(params=params)
 
     def supported_ocr_languages(self) -> OcrLanguageSupport:
         return _ppocr_supported_languages(_rapidocr_vocabulary(self.options.backend))
@@ -770,12 +798,13 @@ class RapidOcrModel(BaseOcrModel):
                             scale=self.scale, cropbox=ocr_rect
                         )
                         im = numpy.asarray(high_res_image)
-                        result = self.reader(
-                            im,
-                            use_det=self.options.use_det,
-                            use_cls=self.options.use_cls,
-                            use_rec=self.options.use_rec,
-                        )
+                        with accelerator_inference_context(self._inference_device):
+                            result = self.reader(
+                                im,
+                                use_det=self.options.use_det,
+                                use_cls=self.options.use_cls,
+                                use_rec=self.options.use_rec,
+                            )
                         if result is None or result.boxes is None:
                             _log.warning("RapidOCR returned empty result!")
                             continue
