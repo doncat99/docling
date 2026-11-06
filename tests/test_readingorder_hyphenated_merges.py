@@ -74,3 +74,39 @@ def test_merge_elements_dehyphenates_lowercase_continuations(
 
     assert item.text == expected
     assert item.orig == expected
+
+
+@pytest.mark.parametrize("prefix", ["algo-", "algo\u00ad", "A😀-"])
+def test_cross_page_merge_preserves_exact_character_provenance(prefix: str) -> None:
+    item = _list_item(prefix)
+    continuation = _element(2, "rithms-")
+    continuation.page_no = 2
+    model = ReadingOrderModel(ReadingOrderOptions())
+    model._merge_elements(_element(1, prefix), continuation, item, page_height=100)
+    last = _element(3, "continued")
+    last.page_no = 3
+    model._merge_elements(continuation, last, item, page_height=100)
+
+    boundary = len(prefix) - 1
+    assert [prov.charspan for prov in item.prov] == [
+        (0, boundary),
+        (boundary, boundary + 6),
+        (boundary + 6, len(item.text)),
+    ]
+    assert [item.text[start:end] for start, end in (p.charspan for p in item.prov)] == [
+        prefix[:-1],
+        "rithms",
+        "continued",
+    ]
+    assert [prov.page_no for prov in item.prov] == [1, 2, 3]
+
+
+def test_nonhyphenated_merge_keeps_separator_outside_page_provenance() -> None:
+    item = _list_item("algo-")
+    ReadingOrderModel(ReadingOrderOptions())._merge_elements(
+        _element(1, "algo-"),
+        _element(2, "Rithms"),
+        item,
+        page_height=100,
+    )
+    assert [prov.charspan for prov in item.prov] == [(0, 5), (6, 12)]
