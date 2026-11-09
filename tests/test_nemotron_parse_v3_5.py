@@ -187,6 +187,41 @@ def test_table_maps_multirow_multicolumn_and_thead() -> None:
     assert [cells[2, col].text for col in range(4)] == ["Kin $", "145", "", "5 % < 6"]
 
 
+def test_table_with_oversized_span_is_rejected_without_building_it() -> None:
+    # Building the span grid used memory linear in the predicted span value.
+    table = r"\begin{tabular}{c}\multicolumn{1000000000}{c}{x}\\\end{tabular}"
+
+    data = _parse(_block("Table", table)).tables[0].data
+
+    assert (data.num_rows, data.num_cols) == (0, 0)
+
+
+def test_table_cell_markup_stays_cell_text() -> None:
+    table = (
+        r"\begin{tabular}{cc}"
+        r'a</td></tr><tr><td colspan="9">b & x<sup>2</sup> \& y\\'
+        r"\end{tabular}"
+    )
+
+    data = _parse(_block("Table", table)).tables[0].data
+
+    assert (data.num_rows, data.num_cols) == (1, 2)
+    assert data.grid[0][0].text == 'a</td></tr><tr><td colspan="9">b'
+    assert data.grid[0][1].text == "x2 & y"
+
+
+def test_table_cell_latex_angle_brackets_stay_cell_text() -> None:
+    table = (
+        r"\begin{tabular}{cc}"
+        r"\textless{}b\textgreater{}x\textless{}/b\textgreater{} & <code>a<b</code>\\"
+        r"\end{tabular}"
+    )
+
+    data = _parse(_block("Table", table)).tables[0].data
+
+    assert [cell.text for cell in data.grid[0]] == ["<b>x</b>", "a<b"]
+
+
 def test_table_cell_under_multirow_with_text_ends_the_span() -> None:
     table = r"\begin{tabular}{cc}\multirow{3}{*}{A} & 1\\ \mbox{} & 2\\ B & 3\\\end{tabular}"
 
@@ -261,10 +296,11 @@ def test_text_maps_inline_bold_and_superscript_runs() -> None:
     group = parent.children[0].resolve(doc)
     assert isinstance(group, InlineGroup)
     runs = [child.resolve(doc) for child in group.children]
-    assert [run.text for run in runs] == ["Mass is", "heavy", "in m", "2"]
+    assert [run.text for run in runs] == ["Mass is ", "heavy", " in m", "2"]
     assert runs[1].formatting is not None and runs[1].formatting.bold
     assert runs[3].formatting is not None
     assert runs[3].formatting.script == Script.SUPER
+    assert doc.export_to_markdown() == "Mass is **heavy** in m2"
 
 
 def test_caption_links_to_adjacent_table() -> None:
@@ -306,7 +342,7 @@ def test_page_header_and_formatted_page_footer_are_furniture() -> None:
     furniture = [
         item.text for item in doc.texts if item.content_layer == ContentLayer.FURNITURE
     ]
-    assert furniture == ["Journal of Tests", "", "Page", "4"]
+    assert furniture == ["Journal of Tests", "", "Page ", "4"]
     assert "Journal of Tests" not in doc.export_to_markdown()
     assert doc.export_to_markdown() == "Body"
 

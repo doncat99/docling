@@ -8,12 +8,69 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from threading import Barrier
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 import torch
 
 from docling.utils.accelerator_utils import accelerator_inference_context
+
+
+def test_rapid_ocr_reader_runs_inside_accelerator_guard(monkeypatch) -> None:
+    import numpy
+    from PIL import Image
+
+    from docling.models.stages.ocr.rapid_ocr_model import RapidOcrModel
+
+    active = False
+
+    @contextmanager
+    def guard(device):
+        nonlocal active
+        assert device == "mps"
+        active = True
+        try:
+            yield
+        finally:
+            active = False
+
+    def read(image, **kwargs):
+        assert active
+        return SimpleNamespace(
+            boxes=numpy.zeros((1, 4, 2)), txts=["text"], scores=[0.9]
+        )
+
+    model = RapidOcrModel.__new__(RapidOcrModel)
+    model._inference_device = "mps"
+    model.options = SimpleNamespace(use_det=True, use_cls=True, use_rec=True)
+    model.reader = read
+    monkeypatch.setattr(
+        "docling.models.stages.ocr.rapid_ocr_model.accelerator_inference_context",
+        guard,
+    )
+    assert model._read(Image.new("RGB", (4, 4))) == [([[0.0, 0.0]] * 4, "text", 0.9)]
+    assert not active
+
+
+@pytest.mark.parametrize("native_formula", [False, True])
+def test_parsed_page_release_preserves_native_formula_input(native_formula) -> None:
+    from docling.pipeline.standard_pdf_pipeline import StandardPdfPipeline
+
+    pipeline = StandardPdfPipeline.__new__(StandardPdfPipeline)
+    pipeline.pipeline_options = SimpleNamespace(
+        generate_parsed_pages=False, do_native_formula_enrichment=native_formula
+    )
+    parsed = object()
+    retained = object()
+    pipeline.heading_hierarchy_model = Mock()
+    pipeline.heading_hierarchy_model.retain_parsed_lines.return_value = retained
+    page = SimpleNamespace(parsed_page=parsed)
+    pipeline._release_parsed_page(page)
+    assert page.parsed_page is (parsed if native_formula else retained)
+    assert pipeline.heading_hierarchy_model.retain_parsed_lines.call_count == (
+        0 if native_formula else 1
+    )
 
 
 def test_layout_guard_covers_transfer_and_materialization_only(monkeypatch) -> None:
@@ -36,8 +93,9 @@ def test_layout_guard_covers_transfer_and_materialization_only(monkeypatch) -> N
             active = False
 
     class Inputs(dict):
-        def to(self, device):
+        def to(self, device, dtype):
             assert active
+            assert dtype == torch.float32
             events.append("transfer")
             return self
 
@@ -77,6 +135,7 @@ def test_layout_guard_covers_transfer_and_materialization_only(monkeypatch) -> N
         TransformersObjectDetectionEngine
     )
     engine._device = torch.device("cpu")
+    forward.dtype = torch.float32
     engine._model = forward
     engine._processor = Mock(side_effect=preprocess)
     engine._processor.post_process_object_detection = postprocess

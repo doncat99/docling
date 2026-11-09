@@ -848,9 +848,9 @@ def test_odt_hyperlink_preserved(tmp_path: Path):
         )
         for item in res.document.texts
     ] == [
-        ("Watch", None),
+        ("Watch ", None),
         ("the example talk", "https://example.com/talk"),
-        ("for context.", None),
+        (" for context.", None),
     ]
     assert res.document.export_to_markdown().strip() == (
         "Watch [the example talk](https://example.com/talk) for context."
@@ -1152,7 +1152,7 @@ def test_odt_preserves_hyperlinks_in_block_text(
             str(item.hyperlink) if item.hyperlink is not None else None,
         )
         for item in inline_items
-    ] == [("Read", None), ("details", "#details"), ("now", None)]
+    ] == [("Read ", None), ("details", "#details"), (" now", None)]
     assert result.document.export_to_markdown().strip() == (
         f"{expected_markdown} Read [details](#details) now"
     )
@@ -1741,6 +1741,57 @@ def test_e2e_odf_conversions(odf_documents):
     _test_e2e_odf_conversions_impl(odf_documents)
 
 
+def test_ods_singleton_with_formatting_or_link_stays_a_table(tmp_path: Path):
+    from docling.datamodel.backend_options import OdsBackendOptions
+    from docling.document_converter import OdsFormatOption
+
+    source = OdfDocument("spreadsheet")
+    source.body.clear()
+    bold_style = Style("text", name="bold_style")
+    bold_style.set_properties(area="text", **{"fo:font-weight": "bold"})
+    source.insert_style(bold_style, automatic=True)
+
+    bold_paragraph = Paragraph()
+    bold_paragraph.append(Span("bold", style="bold_style"))
+    link_paragraph = Paragraph()
+    link_paragraph.append(Link("https://example.com/", text="site"))
+    plain_paragraph = Paragraph()
+    plain_paragraph.append(Span("span", style="no_such_style"))
+
+    sheet = Table("Sheet1", width=1, height=7)
+    for name, paragraph in (
+        ("A1", bold_paragraph),
+        ("A3", link_paragraph),
+        ("A5", plain_paragraph),
+    ):
+        cell = Cell()
+        cell.set_attribute("office:value-type", "string")
+        cell.append(paragraph)
+        sheet.set_cell(name, cell)
+    sheet.set_value("A7", "value")
+    source.body.append(sheet)
+    path = tmp_path / "singletons.ods"
+    source.save(path)
+
+    converter = DocumentConverter(
+        allowed_formats=[InputFormat.ODS],
+        format_options={
+            InputFormat.ODS: OdsFormatOption(
+                backend_options=OdsBackendOptions(treat_singleton_as_text=True)
+            )
+        },
+    )
+    document = converter.convert(path).document
+
+    bold, link = (table.data.table_cells[0] for table in document.tables)
+    assert isinstance(bold, RichTableCell)
+    assert bold.ref.resolve(document).children[0].resolve(document).formatting.bold
+    assert isinstance(link, RichTableCell)
+    run = link.ref.resolve(document).children[0].resolve(document)
+    assert (run.text, str(run.hyperlink)) == ("site", "https://example.com/")
+    assert {"span", "value"} <= {item.text for item in document.texts}
+
+
 def test_ods_treat_singleton_as_text(tmp_path: Path):
     """Test that singleton cells are treated as TextItem when option is enabled.
 
@@ -1871,6 +1922,48 @@ def test_ods_gap_tolerance(tmp_path: Path):
     merged_table = tables_merged[0]
     assert merged_table.prov[0].bbox.l == 0, "Merged table should start at column 0"
     assert merged_table.prov[0].bbox.r == 3, "Merged table should end at column 3"
+
+
+@pytest.mark.parametrize(
+    ("note", "expected_shapes"),
+    [
+        # The blank merged row A4:C4 only separates the two tables.
+        (None, [(3, 3), (2, 3)]),
+        # A value in the same row makes A4:C4 part of one table.
+        ("note", [(6, 4)]),
+    ],
+)
+def test_ods_blank_merged_separator_row_splits_tables(
+    tmp_path: Path, note: str | None, expected_shapes: list[tuple[int, int]]
+) -> None:
+    """The ODS counterpart of the XLSX regression test for #4965."""
+    path = tmp_path / "separator.ods"
+    doc = OdfDocument("spreadsheet")
+    body = doc.body
+    body.clear()
+    sheet = Table("Sheet1", width=4, height=6)
+    for row_idx, row in enumerate(
+        [
+            [None, "2025", "2026"],
+            ["GDP", 1.5, 2],
+            ["CPI", 3.1, 2.9],
+            [None, None, None, note],
+            [None, "Q1", "Q2"],
+            ["Profits", 384, 276.9],
+        ]
+    ):
+        for col_idx, value in enumerate(row):
+            if value is not None:
+                sheet.set_value((col_idx, row_idx), value)
+    sheet.set_span("A4:C4")
+    body.append(sheet)
+    doc.save(str(path))
+
+    res = DocumentConverter(allowed_formats=[InputFormat.ODS]).convert(path)
+
+    assert [
+        (table.data.num_rows, table.data.num_cols) for table in res.document.tables
+    ] == expected_shapes
 
 
 def test_ods_sheet_names_filter(tmp_path: Path):
@@ -2177,3 +2270,266 @@ def test_odp_speaker_notes_go_to_notes_layer(tmp_path: Path):
     assert document.export_to_markdown() == (
         "# Slide 1\n\nSlide text 1\n\n# Slide 2\n\nSlide text 2"
     )
+
+
+def _odt_master(source: OdfDocument, name: str) -> Element:
+    masters = source.styles.get_element("office:master-styles")
+    assert masters is not None
+    for master in masters.children:
+        if master.get_attribute("style:name") == name:
+            return master
+    master = Element.from_tag(f'<style:master-page style:name="{name}"/>')
+    masters.append(master)
+    return master
+
+
+def _convert_odt_source(source: OdfDocument, path: Path) -> DoclingDocument:
+    source.save(str(path))
+    return DocumentConverter(allowed_formats=[InputFormat.ODT]).convert(path).document
+
+
+def test_odt_header_footer_structure_and_body(tmp_path: Path):
+    source = OdfDocument("text")
+    source.body.clear()
+    source.body.append(Header(1, "Body heading"))
+    source.body.append(Paragraph("Body paragraph."))
+    baseline = _convert_odt_source(source, tmp_path / "baseline.odt")
+    master = _odt_master(source, "Standard")
+    header = Element.from_tag(
+        '<style:header><text:h text:outline-level="2">Header heading</text:h>'
+        '<text:p>Header text<office:annotation office:name="comment">'
+        "<dc:creator>Header reviewer</dc:creator><dc:date>2026-01-01</dc:date>"
+        "<text:p>Header note</text:p></office:annotation>.</text:p>"
+        "<text:list><text:list-item><text:p>Header list</text:p>"
+        "</text:list-item></text:list></style:header>"
+    )
+    table = Table("HeaderTable", width=1, height=1)
+    table.set_value("A1", "Header cell")
+    header.append(table)
+    image_path = tmp_path / "header.png"
+    Image.new("RGB", (2, 2), "red").save(image_path)
+    header.append(
+        Frame.image_frame(source.add_file(str(image_path)), size=("1cm", "1cm"))
+    )
+    master.append(header)
+    master.append(
+        Element.from_tag("<style:footer><text:p>Footer text</text:p></style:footer>")
+    )
+    document = _convert_odt_source(source, tmp_path / "furniture.odt")
+
+    assert document.export_to_markdown() == baseline.export_to_markdown()
+    furniture = [
+        group
+        for group in document.groups
+        if group.content_layer == ContentLayer.FURNITURE
+    ]
+    assert [group.name for group in furniture if group.label == GroupLabel.SECTION] == [
+        "page header",
+        "page footer",
+    ]
+    header_group = furniture[0]
+    assert header_group.parent.cref == document.body.self_ref
+    assert [
+        item.text
+        for item in document.texts
+        if item.content_layer == ContentLayer.FURNITURE
+    ] == ["Header heading", "Header text.", "Header list", "Footer text"]
+    assert len(document.tables) == 1
+    assert document.tables[0].content_layer == ContentLayer.FURNITURE
+    assert document.tables[0].data.table_cells[0].text == "Header cell"
+    assert len(document.pictures) == 1
+    assert document.pictures[0].content_layer == ContentLayer.FURNITURE
+    paragraph = next(item for item in document.texts if item.text == "Header text.")
+    assert paragraph.parent.resolve(document) == header_group
+    assert len(paragraph.comments) == 1
+    assert [
+        child.resolve(document).text
+        for child in paragraph.comments[0].resolve(document).children
+    ] == ["[author: Header reviewer, time: 2026-01-01]: Header note"]
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["header", "header-left", "header-first", "footer", "footer-left", "footer-first"],
+)
+@pytest.mark.parametrize("display", [None, "true", "false", "0"])
+def test_odt_header_footer_variants(tmp_path: Path, variant: str, display: str | None):
+    source = OdfDocument("text")
+    source.body.clear()
+    source.body.append(Paragraph("Body"))
+    attribute = f' style:display="{display}"' if display is not None else ""
+    _odt_master(source, "Standard").append(
+        Element.from_tag(
+            f"<style:{variant}{attribute}><text:p>{variant}</text:p></style:{variant}>"
+        )
+    )
+    _odt_master(source, "Unused").append(
+        Element.from_tag("<style:header><text:p>Unused header</text:p></style:header>")
+    )
+    document = _convert_odt_source(source, tmp_path / "variants.odt")
+    assert [
+        item.text
+        for item in document.texts
+        if item.content_layer == ContentLayer.FURNITURE
+    ] == ([] if display in ("false", "0") else [variant])
+
+
+@pytest.mark.parametrize("explicit_first", [False, True])
+def test_odt_master_references_and_next_cycle(tmp_path: Path, explicit_first: bool):
+    source = OdfDocument("text")
+    source.body.clear()
+    source.body.append(
+        Element.from_tag('<text:p text:style-name="Child">First</text:p>')
+        if explicit_first
+        else Paragraph("First")
+    )
+    source.body.append(
+        Element.from_tag('<text:p text:style-name="Child">Second</text:p>')
+    )
+    source.body.append(
+        Element.from_tag('<text:p text:style-name="Child">Repeated</text:p>')
+    )
+    source.body.append(
+        Element.from_tag(
+            '<table:table table:name="BodyTable" table:style-name="TablePage"><table:table-row><table:table-cell><text:p text:style-name="Ignored">Cell</text:p></table:table-cell></table:table-row></table:table>'
+        )
+    )
+    automatic = source.content.get_element("office:automatic-styles")
+    assert automatic is not None
+    for xml in (
+        '<style:style style:name="Child" style:family="paragraph" style:parent-style-name="Parent"/>',
+        '<style:style style:name="Parent" style:family="paragraph" style:master-page-name="Custom"/>',
+        '<style:style style:name="Ignored" style:family="paragraph" style:master-page-name="Unused"/>',
+        '<style:style style:name="TablePage" style:family="table" style:master-page-name="TableMaster"/>',
+    ):
+        target = (
+            source.styles.get_element("office:styles")
+            if 'style:name="Parent"' in xml
+            else automatic
+        )
+        assert target is not None
+        target.append(Element.from_tag(xml))
+    for name in ("Standard", "Custom", "TableMaster", "Next", "Unused"):
+        _odt_master(source, name).append(
+            Element.from_tag(f"<style:header><text:p>{name}</text:p></style:header>")
+        )
+    _odt_master(source, "Custom").set_attribute("style:next-style-name", "Next")
+    _odt_master(source, "Next").set_attribute("style:next-style-name", "Custom")
+    document = _convert_odt_source(source, tmp_path / "masters.odt")
+    expected = ([] if explicit_first else ["Standard"]) + [
+        "Custom",
+        "TableMaster",
+        "Next",
+    ]
+    assert [
+        item.text
+        for item in document.texts
+        if item.content_layer == ContentLayer.FURNITURE
+    ] == expected
+
+
+def test_odt_first_master_fallback_and_empty_header(tmp_path: Path):
+    source = OdfDocument("text")
+    source.body.clear()
+    source.body.append(Paragraph("Body"))
+    master = _odt_master(source, "Standard")
+    master.set_attribute("style:name", "FirstDeclared")
+    master.append(Element.from_tag("<style:header><text:p/></style:header>"))
+    master.append(
+        Element.from_tag(
+            "<style:footer><text:p>Fallback footer</text:p></style:footer>"
+        )
+    )
+    document = _convert_odt_source(source, tmp_path / "fallback.odt")
+    assert [
+        group.name
+        for group in document.groups
+        if group.content_layer == ContentLayer.FURNITURE
+    ] == ["page footer"]
+    assert [
+        item.text
+        for item in document.texts
+        if item.content_layer == ContentLayer.FURNITURE
+    ] == ["Fallback footer"]
+
+
+def test_odt_master_variant_order_and_shared_text(tmp_path: Path):
+    source = OdfDocument("text")
+    source.body.clear()
+    master = _odt_master(source, "Standard")
+    # XML storage order does not define extraction order. Equal definitions stay distinct.
+    variants = [
+        "footer-first",
+        "footer-left",
+        "footer",
+        "header-first",
+        "header-left",
+        "header",
+    ]
+    for variant in variants:
+        master.append(
+            Element.from_tag(
+                f"<style:{variant}><text:p>Same text</text:p></style:{variant}>"
+            )
+        )
+    document = _convert_odt_source(source, tmp_path / "ordered.odt")
+    assert [group.name for group in document.groups] == ["page header"] * 3 + [
+        "page footer"
+    ] * 3
+    assert [item.text for item in document.texts] == ["Same text"] * 6
+
+
+def test_odt_table_cell_is_rich_only_when_more_than_plain_text(tmp_path: Path):
+    source = OdfDocument("text")
+    source.body.clear()
+    sub_style = Style("text", name="sub_style")
+    sub_style.set_properties(area="text", **{"style:text-position": "sub 58%"})
+    source.insert_style(sub_style, automatic=True)
+    italic_style = Style("text", name="italic_style")
+    italic_style.set_properties(area="text", **{"fo:font-style": "italic"})
+    source.insert_style(italic_style, automatic=True)
+    script_paragraph = Paragraph()
+    script_paragraph.append("H")
+    script_paragraph.append(Span("2", style="sub_style"))
+    script_paragraph.append("O")
+    italic_paragraph = Paragraph()
+    italic_paragraph.append(Span("word", style="italic_style"))
+    link_paragraph = Paragraph()
+    link_paragraph.append(Link("https://example.com/", text="site"))
+    plain_paragraph = Paragraph()
+    plain_paragraph.append(Span("word", style="no_such_style"))
+    row = Row()
+    for paragraph in (
+        script_paragraph,
+        italic_paragraph,
+        link_paragraph,
+        plain_paragraph,
+    ):
+        cell = Cell()
+        # A typed cell has a value, so only its runs can make it rich.
+        cell.set_attribute("office:value-type", "string")
+        cell.append(paragraph)
+        row.append(cell)
+    table = Table("Table1")
+    table.append(row)
+    source.body.append(table)
+
+    document = _convert_odt_source(source, tmp_path / "table_sub.odt")
+
+    rich, italic, link, plain = document.tables[0].data.table_cells
+    assert not isinstance(plain, RichTableCell)
+    assert plain.text == "word"
+    assert isinstance(italic, RichTableCell)
+    assert italic.ref.resolve(document).children[0].resolve(document).formatting.italic
+    assert isinstance(link, RichTableCell)
+    assert (
+        str(link.ref.resolve(document).children[0].resolve(document).hyperlink)
+        == "https://example.com/"
+    )
+    assert isinstance(rich, RichTableCell)
+    inline = rich.ref.resolve(document).children[0].resolve(document)
+    assert inline.label == GroupLabel.INLINE
+    runs = [child.resolve(document) for child in inline.children]
+    assert [run.text for run in runs] == ["H", "2", "O"]
+    assert runs[1].formatting.script == Script.SUB
+    assert "H<sub>2</sub>O" in document.export_to_html()

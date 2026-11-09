@@ -238,7 +238,7 @@ class TransformersObjectDetectionEngine(HfObjectDetectionEngineBase):
 
         # Get target sizes for post-processing
         with accelerator_inference_context(str(self._device)):
-            inputs = inputs.to(self._device)
+            inputs = inputs.to(self._device, self._model.dtype)
             target_sizes = torch.tensor(
                 [[img.height, img.width] for img in images], device=self._device
             )
